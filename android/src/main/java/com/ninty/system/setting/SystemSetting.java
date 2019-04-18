@@ -50,7 +50,6 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
     private volatile BroadcastReceiver wifiBR;
     private volatile BroadcastReceiver bluetoothBR;
     private volatile BroadcastReceiver locationBR;
-    private volatile BroadcastReceiver locationModeBR;
     private volatile BroadcastReceiver airplaneBR;
 
     public SystemSetting(ReactApplicationContext reactContext) {
@@ -74,8 +73,12 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
 
     private void unregisterVolumeReceiver() {
         if (volumeBR.isRegistered()) {
-            mContext.unregisterReceiver(volumeBR);
-            volumeBR.setRegistered(false);
+            try{
+                mContext.unregisterReceiver(volumeBR);
+                volumeBR.setRegistered(false);
+            }catch (IllegalArgumentException ex) {
+                Log.e(TAG, ex.getMessage());
+            }
         }
     }
 
@@ -146,28 +149,6 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
                     locationFilter.addAction(LocationManager.PROVIDERS_CHANGED_ACTION);
 
                     mContext.registerReceiver(locationBR, locationFilter);
-                }
-            }
-        }
-    }
-
-    private void listenLocationModeState() {
-        if (locationModeBR == null) {
-            synchronized (this) {
-                if (locationModeBR == null) {
-                    locationModeBR = new BroadcastReceiver() {
-                        @Override
-                        public void onReceive(Context context, Intent intent) {
-                            if (intent.getAction().equals(LocationManager.MODE_CHANGED_ACTION)) {
-                                mContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-                                        .emit("EventLocationModeChange", getLocationMode());
-                            }
-                        }
-                    };
-                    IntentFilter locationFilter = new IntentFilter();
-                    locationFilter.addAction(LocationManager.MODE_CHANGED_ACTION);
-
-                    mContext.registerReceiver(locationModeBR, locationFilter);
                 }
             }
         }
@@ -400,21 +381,17 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
     @ReactMethod
     public void getLocationMode(Promise promise) {
         if (lm != null) {
-            promise.resolve(getLocationMode());
+            int result = 0;
+            if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                result |= 1;
+            }
+            if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                result |= 1 << 1;
+            }
+            promise.resolve(result);
         } else {
             promise.reject("-1", "get location manager fail");
         }
-    }
-
-    private int getLocationMode() {
-        int result = 0;
-        if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            result |= 1;
-        }
-        if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-            result |= 1 << 1;
-        }
-        return result;
     }
 
     private boolean isLocationEnable() {
@@ -466,10 +443,6 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
                 listenLocationState();
                 promise.resolve(null);
                 return;
-            case "locationMode":
-                listenLocationModeState();
-                promise.resolve(null);
-                return;
             case "airplane":
                 listenAirplaneState();
                 promise.resolve(null);
@@ -501,17 +474,6 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
             mContext.getCurrentActivity().startActivityForResult(intent, setting.requestCode);
         } else {
             Log.w(TAG, "getCurrentActivity() return null, switch will be ignore");
-        }
-    }
-
-    @ReactMethod
-    public void openAppSystemSettings() {
-        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
-        intent.setData(Uri.parse("package:" + mContext.getPackageName()));
-        if (intent.resolveActivity(mContext.getPackageManager()) != null) {
-            mContext.startActivity(intent);
         }
     }
 
@@ -552,10 +514,6 @@ public class SystemSetting extends ReactContextBaseJavaModule implements Activit
         }
         if (locationBR != null) {
             mContext.unregisterReceiver(locationBR);
-            locationBR = null;
-        }
-        if (locationModeBR != null) {
-            mContext.unregisterReceiver(locationModeBR);
             locationBR = null;
         }
         if (airplaneBR != null) {
